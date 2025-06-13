@@ -73,14 +73,37 @@ class DownloadAndLoadQwenModel:
 
     def load(self, model_name: str):
         model_dir = os.path.join(folder_paths.models_dir, "Qwen", model_name.replace("/", "_"))
-        if not os.path.exists(model_dir):
-            snapshot_download(repo_id=model_name, local_dir=model_dir, local_dir_use_symlinks=False)
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_dir,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            attn_implementation="flash_attention_2",
+        # Always attempt download with resume enabled so an interrupted download
+        # can be continued when the node is executed again.
+        snapshot_download(
+            repo_id=model_name,
+            local_dir=model_dir,
+            local_dir_use_symlinks=False,
+            resume_download=True,
         )
+        try:
+            model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                model_dir,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                attn_implementation="flash_attention_2",
+            )
+        except Exception:
+            # If loading fails (likely due to an incomplete download), force a
+            # re-download and try again.
+            snapshot_download(
+                repo_id=model_name,
+                local_dir=model_dir,
+                local_dir_use_symlinks=False,
+                resume_download=True,
+                force_download=True,
+            )
+            model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                model_dir,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                attn_implementation="flash_attention_2",
+            )
         processor = AutoProcessor.from_pretrained(model_dir)
         return (QwenModel(model=model, processor=processor),)
 

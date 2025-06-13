@@ -14,6 +14,6 @@ The bounding boxes are converted to absolute pixel coordinates so that they can 
 
 ## Usage
 1. Place this repository inside your `ComfyUI/custom_nodes` directory.
-2. From the **Download and Load Qwen2.5-VL Model** node, select the model you want to use. It will be downloaded automatically if not present.
+2. From the **Download and Load Qwen2.5-VL Model** node, select the model you want to use. The snapshot download will resume automatically if a previous attempt was interrupted.
 3. Connect the output model to **Qwen2.5-VL Object Detection**, provide an image and a prompt like `Locate the cat and output its bbox coordinates in JSON format`.
 4. Feed the resulting bounding boxes into the SAM2 workflow for further processing.
