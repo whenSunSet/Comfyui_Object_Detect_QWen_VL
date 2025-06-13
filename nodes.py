@@ -50,6 +50,7 @@ def parse_boxes(text: str, img_width: int, img_height: int, input_w: int, input_
 class QwenModel:
     model: Any
     processor: Any
+    device: str
 
 
 class DownloadAndLoadQwenModel:
@@ -63,6 +64,12 @@ class DownloadAndLoadQwenModel:
                     "Qwen/Qwen2.5-VL-32B-Instruct",
                     "Qwen/Qwen2.5-VL-72B-Instruct",
                 ], ),
+                "device": ([
+                    "auto",
+                    "cuda:0",
+                    "cuda:1",
+                    "cpu",
+                ], ),
             }
         }
 
@@ -71,7 +78,7 @@ class DownloadAndLoadQwenModel:
     FUNCTION = "load"
     CATEGORY = "Qwen2.5-VL"
 
-    def load(self, model_name: str):
+    def load(self, model_name: str, device: str):
         model_dir = os.path.join(folder_paths.models_dir, "Qwen", model_name.replace("/", "_"))
         # Always attempt download with resume enabled so an interrupted download
         # can be continued when the node is executed again.
@@ -81,11 +88,18 @@ class DownloadAndLoadQwenModel:
             local_dir_use_symlinks=False,
             resume_download=True,
         )
+        if device == "auto":
+            device_map = "auto"
+        elif device == "cpu":
+            device_map = {"": "cpu"}
+        else:
+            device_map = {"": device}
+
         try:
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 model_dir,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map=device_map,
                 attn_implementation="flash_attention_2",
             )
         except Exception:
@@ -101,11 +115,11 @@ class DownloadAndLoadQwenModel:
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 model_dir,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map=device_map,
                 attn_implementation="flash_attention_2",
             )
         processor = AutoProcessor.from_pretrained(model_dir)
-        return (QwenModel(model=model, processor=processor),)
+        return (QwenModel(model=model, processor=processor, device=device),)
 
 
 class QwenVLDetection:
@@ -128,6 +142,11 @@ class QwenVLDetection:
         model = qwen_model.model
         processor = qwen_model.processor
         device = next(model.parameters()).device
+        if qwen_model.device.startswith("cuda") and torch.cuda.is_available():
+            try:
+                torch.cuda.set_device(int(qwen_model.device.split(":")[1]))
+            except Exception:
+                pass
 
         if isinstance(image, torch.Tensor):
             image = (image.squeeze().clamp(0, 1) * 255).to(torch.uint8).cpu().numpy()

@@ -5,7 +5,7 @@ This repository provides a custom [ComfyUI](https://github.com/comfyanonymous/Co
 ## Nodes
 
 ### `DownloadAndLoadQwenModel`
-Downloads a chosen Qwen 2.5-VL model into `models/Qwen` and returns the loaded model and processor.
+Downloads a chosen Qwen 2.5-VL model into `models/Qwen` and returns the loaded model and processor. You can also choose which device to load the model onto (e.g. `cuda:1` if you have multiple GPUs).
 
 ### `QwenVLDetection`
 Runs a detection prompt on an input image using the loaded model. The node outputs the raw text response and the bounding box coordinates.
@@ -14,6 +14,6 @@ The bounding boxes are converted to absolute pixel coordinates so that they can 
 
 ## Usage
 1. Place this repository inside your `ComfyUI/custom_nodes` directory.
-2. From the **Download and Load Qwen2.5-VL Model** node, select the model you want to use. The snapshot download will resume automatically if a previous attempt was interrupted.
+2. From the **Download and Load Qwen2.5-VL Model** node, select the model you want to use and, if necessary, choose the device (such as `cuda:1`) where it should be loaded. The snapshot download will resume automatically if a previous attempt was interrupted.
 3. Connect the output model to **Qwen2.5-VL Object Detection**, provide an image and a prompt like `Locate the cat and output its bbox coordinates in JSON format`.
 4. Feed the resulting bounding boxes into the SAM2 workflow for further processing.
