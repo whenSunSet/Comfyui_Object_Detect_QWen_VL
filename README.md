@@ -5,7 +5,7 @@ This repository provides a custom [ComfyUI](https://github.com/comfyanonymous/Co
 ## Nodes
 
 ### `DownloadAndLoadQwenModel`
-Downloads a chosen Qwen 2.5-VL model into `models/Qwen` and returns the loaded model and processor. You can choose which device to load the model onto (e.g. `cuda:1` if you have multiple GPUs) and the precision for the checkpoint (INT4, INT8, BF16, FP16 or FP32).
+Downloads a chosen Qwen 2.5-VL model into `models/Qwen` and returns the loaded model and processor. You can choose which device to load the model onto (e.g. `cuda:1` if you have multiple GPUs) and the precision for the checkpoint (INT4, INT8, BF16, FP16 or FP32).  FlashAttention is used for FP16/BF16 but FP32 falls back to PyTorch SDPA since FlashAttention does not support it.
 
 ### `QwenVLDetection`
 Runs a detection prompt on an input image using the loaded model. The node outputs the raw text response and the bounding box coordinates. You can specify which boxes to return using the **bbox_selection** parameter and filter them with **score_threshold**:

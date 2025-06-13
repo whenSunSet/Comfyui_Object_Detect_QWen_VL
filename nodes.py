@@ -153,13 +153,18 @@ class DownloadAndLoadQwenModel:
         elif precision == "INT8":
             quant_config = BitsAndBytesConfig(load_in_8bit=True)
 
+        attn_impl = "flash_attention_2"
+        if precision == "FP32":
+            # FlashAttention doesn't support fp32. Fall back to SDPA.
+            attn_impl = "sdpa"
+
         try:
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 model_dir,
                 torch_dtype=torch_dtype,
                 quantization_config=quant_config,
                 device_map=device_map,
-                attn_implementation="flash_attention_2",
+                attn_implementation=attn_impl,
             )
         except Exception:
             # If loading fails (likely due to an incomplete download), force a
@@ -176,7 +181,7 @@ class DownloadAndLoadQwenModel:
                 torch_dtype=torch_dtype,
                 quantization_config=quant_config,
                 device_map=device_map,
-                attn_implementation="flash_attention_2",
+                attn_implementation=attn_impl,
             )
         processor = AutoProcessor.from_pretrained(model_dir)
         return (QwenModel(model=model, processor=processor, device=device),)
