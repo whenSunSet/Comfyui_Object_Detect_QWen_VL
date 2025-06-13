@@ -2,7 +2,7 @@ import os
 import ast
 import json
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import torch
 from PIL import Image
@@ -22,7 +22,13 @@ def parse_json(json_output: str) -> str:
     return json_output
 
 
-def parse_boxes(text: str, img_width: int, img_height: int, input_w: int, input_h: int) -> List[List[int]]:
+def parse_boxes(
+    text: str,
+    img_width: int,
+    img_height: int,
+    input_w: int,
+    input_h: int,
+) -> List[List[int]]:
     text = parse_json(text)
     try:
         data = ast.literal_eval(text)
@@ -30,9 +36,10 @@ def parse_boxes(text: str, img_width: int, img_height: int, input_w: int, input_
         end_idx = text.rfind('"}') + len('"}')
         truncated = text[:end_idx] + "]"
         data = ast.literal_eval(truncated)
-    boxes = []
+    items: List[Tuple[float, List[int]]] = []
     for item in data:
         box = item.get("bbox_2d") or item.get("bbox") or item
+        score = float(item.get("score", 0))
         y1, x1, y2, x2 = box[1], box[0], box[3], box[2]
         abs_y1 = int(y1 / input_h * img_height)
         abs_x1 = int(x1 / input_w * img_width)
@@ -42,8 +49,9 @@ def parse_boxes(text: str, img_width: int, img_height: int, input_w: int, input_
             abs_x1, abs_x2 = abs_x2, abs_x1
         if abs_y1 > abs_y2:
             abs_y1, abs_y2 = abs_y2, abs_y1
-        boxes.append([abs_x1, abs_y1, abs_x2, abs_y2])
-    return boxes
+        items.append((score, [abs_x1, abs_y1, abs_x2, abs_y2]))
+    items.sort(key=lambda x: x[0], reverse=True)
+    return [box for _, box in items]
 
 
 @dataclass
@@ -130,6 +138,7 @@ class QwenVLDetection:
                 "qwen_model": ("QWEN_MODEL",),
                 "image": ("IMAGE",),
                 "target": ("STRING", {"default": "object"}),
+                "bbox_selection": ("STRING", {"default": "all"}),
             },
         }
 
@@ -138,7 +147,7 @@ class QwenVLDetection:
     FUNCTION = "detect"
     CATEGORY = "Qwen2.5-VL"
 
-    def detect(self, qwen_model: QwenModel, image, target: str):
+    def detect(self, qwen_model: QwenModel, image, target: str, bbox_selection: str = "all"):
         model = qwen_model.model
         processor = qwen_model.processor
         device = next(model.parameters()).device
@@ -168,6 +177,26 @@ class QwenVLDetection:
         input_h = inputs['image_grid_thw'][0][1] * 14
         input_w = inputs['image_grid_thw'][0][2] * 14
         boxes = parse_boxes(output_text, image.width, image.height, input_w, input_h)
+
+        selection = bbox_selection.strip().lower()
+        if selection == "merge":
+            if boxes:
+                x1 = min(b[0] for b in boxes)
+                y1 = min(b[1] for b in boxes)
+                x2 = max(b[2] for b in boxes)
+                y2 = max(b[3] for b in boxes)
+                boxes = [[x1, y1, x2, y2]]
+            else:
+                boxes = []
+        elif selection != "all":
+            idxs = []
+            for part in selection.replace(",", " ").split():
+                try:
+                    idxs.append(int(part))
+                except Exception:
+                    continue
+            boxes = [boxes[i] for i in idxs if 0 <= i < len(boxes)]
+
         return (output_text, boxes)
 
 
