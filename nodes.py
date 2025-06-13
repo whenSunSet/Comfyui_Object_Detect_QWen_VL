@@ -129,7 +129,7 @@ class QwenVLDetection:
             "required": {
                 "qwen_model": ("QWEN_MODEL",),
                 "image": ("IMAGE",),
-                "prompt": ("STRING", {"multiline": True, "default": "Locate the object and output bbox in JSON"}),
+                "target": ("STRING", {"default": "object"}),
             },
         }
 
@@ -138,7 +138,7 @@ class QwenVLDetection:
     FUNCTION = "detect"
     CATEGORY = "Qwen2.5-VL"
 
-    def detect(self, qwen_model: QwenModel, image, prompt: str):
+    def detect(self, qwen_model: QwenModel, image, target: str):
         model = qwen_model.model
         processor = qwen_model.processor
         device = next(model.parameters()).device
@@ -147,6 +147,8 @@ class QwenVLDetection:
                 torch.cuda.set_device(int(qwen_model.device.split(":")[1]))
             except Exception:
                 pass
+
+        prompt = f"Locate the {target} and output bbox in JSON"
 
         if isinstance(image, torch.Tensor):
             image = (image.squeeze().clamp(0, 1) * 255).to(torch.uint8).cpu().numpy()
