@@ -71,7 +71,13 @@ def parse_boxes(
             abs_y1, abs_y2 = abs_y2, abs_y1
         items.append((score, [abs_x1, abs_y1, abs_x2, abs_y2]))
     items.sort(key=lambda x: x[0], reverse=True)
-    return [box for sc, box in items if sc >= score_threshold]
+    filtered = [box for sc, box in items if sc >= score_threshold]
+    if not filtered and items:
+        # SAM2 expects at least one bbox. If all boxes are filtered out,
+        # fall back to the highest‑scoring one so downstream nodes don't
+        # error out.
+        filtered = [items[0][1]]
+    return filtered
 
 
 @dataclass

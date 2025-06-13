@@ -14,6 +14,7 @@ Runs a detection prompt on an input image using the loaded model. The node outpu
 - `merge` – merge all boxes into a single bounding box
 - Comma-separated indices such as `0`, `1,2` or `0,2` – return only the selected boxes, sorted by detection confidence
 - `score_threshold` – discard boxes whose confidence score is below this value (default `0`)
+- If no boxes remain after filtering, the highest scoring box is returned so downstream nodes like SAM2 do not fail
 
 The bounding boxes are converted to absolute pixel coordinates so that they can be directly fed into the SAM2 nodes.
 
