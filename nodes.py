@@ -28,6 +28,7 @@ def parse_boxes(
     img_height: int,
     input_w: int,
     input_h: int,
+    score_threshold: float = 0.0,
 ) -> List[List[int]]:
     text = parse_json(text)
     try:
@@ -51,7 +52,7 @@ def parse_boxes(
             abs_y1, abs_y2 = abs_y2, abs_y1
         items.append((score, [abs_x1, abs_y1, abs_x2, abs_y2]))
     items.sort(key=lambda x: x[0], reverse=True)
-    return [box for _, box in items]
+    return [box for sc, box in items if sc >= score_threshold]
 
 
 @dataclass
@@ -139,6 +140,7 @@ class QwenVLDetection:
                 "image": ("IMAGE",),
                 "target": ("STRING", {"default": "object"}),
                 "bbox_selection": ("STRING", {"default": "all"}),
+                "score_threshold": ("FLOAT", {"default": 0.0}),
             },
         }
 
@@ -147,7 +149,14 @@ class QwenVLDetection:
     FUNCTION = "detect"
     CATEGORY = "Qwen2.5-VL"
 
-    def detect(self, qwen_model: QwenModel, image, target: str, bbox_selection: str = "all"):
+    def detect(
+        self,
+        qwen_model: QwenModel,
+        image,
+        target: str,
+        bbox_selection: str = "all",
+        score_threshold: float = 0.0,
+    ):
         model = qwen_model.model
         processor = qwen_model.processor
         device = next(model.parameters()).device
@@ -176,7 +185,14 @@ class QwenVLDetection:
         output_text = processor.batch_decode(gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
         input_h = inputs['image_grid_thw'][0][1] * 14
         input_w = inputs['image_grid_thw'][0][2] * 14
-        boxes = parse_boxes(output_text, image.width, image.height, input_w, input_h)
+        boxes = parse_boxes(
+            output_text,
+            image.width,
+            image.height,
+            input_w,
+            input_h,
+            score_threshold,
+        )
 
         selection = bbox_selection.strip().lower()
         if selection == "merge":
