@@ -7,7 +7,11 @@ from typing import List, Dict, Any, Tuple
 import torch
 from PIL import Image
 from huggingface_hub import snapshot_download
-from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+from transformers import (
+    AutoProcessor,
+    Qwen2_5_VLForConditionalGeneration,
+    BitsAndBytesConfig,
+)
 
 import folder_paths
 
@@ -104,6 +108,13 @@ class DownloadAndLoadQwenModel:
                     "cuda:1",
                     "cpu",
                 ], ),
+                "precision": ([
+                    "INT4",
+                    "INT8",
+                    "BF16",
+                    "FP16",
+                    "FP32",
+                ], ),
             }
         }
 
@@ -112,7 +123,7 @@ class DownloadAndLoadQwenModel:
     FUNCTION = "load"
     CATEGORY = "Qwen2.5-VL"
 
-    def load(self, model_name: str, device: str):
+    def load(self, model_name: str, device: str, precision: str):
         model_dir = os.path.join(folder_paths.models_dir, "Qwen", model_name.replace("/", "_"))
         # Always attempt download with resume enabled so an interrupted download
         # can be continued when the node is executed again.
@@ -129,10 +140,24 @@ class DownloadAndLoadQwenModel:
         else:
             device_map = {"": device}
 
+        precision = precision.upper()
+        dtype_map = {
+            "BF16": torch.bfloat16,
+            "FP16": torch.float16,
+            "FP32": torch.float32,
+        }
+        torch_dtype = dtype_map.get(precision, torch.bfloat16)
+        quant_config = None
+        if precision == "INT4":
+            quant_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True)
+        elif precision == "INT8":
+            quant_config = BitsAndBytesConfig(load_in_8bit=True)
+
         try:
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 model_dir,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=torch_dtype,
+                quantization_config=quant_config,
                 device_map=device_map,
                 attn_implementation="flash_attention_2",
             )
@@ -148,7 +173,8 @@ class DownloadAndLoadQwenModel:
             )
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 model_dir,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=torch_dtype,
+                quantization_config=quant_config,
                 device_map=device_map,
                 attn_implementation="flash_attention_2",
             )
