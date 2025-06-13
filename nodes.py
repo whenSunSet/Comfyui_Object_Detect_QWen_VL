@@ -13,12 +13,22 @@ import folder_paths
 
 
 def parse_json(json_output: str) -> str:
+    """Extract the JSON payload from a model response."""
     lines = json_output.splitlines()
     for i, line in enumerate(lines):
         if line.strip() == "```json":
             json_output = "\n".join(lines[i + 1:])
-            json_output = json_output.split("```")[0]
+            json_output = json_output.split("```", 1)[0]
             break
+    try:
+        parsed = json.loads(json_output)
+        # Some responses wrap the JSON in a {"content": "..."} object.
+        if isinstance(parsed, dict) and "content" in parsed:
+            inner = parsed["content"]
+            if isinstance(inner, str):
+                json_output = inner
+    except Exception:
+        pass
     return json_output
 
 
@@ -37,6 +47,15 @@ def parse_boxes(
         end_idx = text.rfind('"}') + len('"}')
         truncated = text[:end_idx] + "]"
         data = ast.literal_eval(truncated)
+    if isinstance(data, dict):
+        inner = data.get("content")
+        if isinstance(inner, str):
+            try:
+                data = ast.literal_eval(inner)
+            except Exception:
+                data = []
+        else:
+            data = []
     items: List[Tuple[float, List[int]]] = []
     for item in data:
         box = item.get("bbox_2d") or item.get("bbox") or item
