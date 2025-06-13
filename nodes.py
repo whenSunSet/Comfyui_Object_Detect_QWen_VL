@@ -165,6 +165,7 @@ class QwenVLDetection:
                 "image": ("IMAGE",),
                 "target": ("STRING", {"default": "object"}),
                 "bbox_selection": ("STRING", {"default": "all"}),
+                "merge_boxes": ("BOOLEAN", {"default": False}),
                 "score_threshold": ("FLOAT", {"default": 0.0}),
             },
         }
@@ -180,6 +181,7 @@ class QwenVLDetection:
         image,
         target: str,
         bbox_selection: str = "all",
+        merge_boxes: bool = False,
         score_threshold: float = 0.0,
     ):
         model = qwen_model.model
@@ -220,16 +222,7 @@ class QwenVLDetection:
         )
 
         selection = bbox_selection.strip().lower()
-        if selection == "merge":
-            if boxes:
-                x1 = min(b[0] for b in boxes)
-                y1 = min(b[1] for b in boxes)
-                x2 = max(b[2] for b in boxes)
-                y2 = max(b[3] for b in boxes)
-                boxes = [[x1, y1, x2, y2]]
-            else:
-                boxes = []
-        elif selection != "all":
+        if selection != "all" and selection:
             idxs = []
             for part in selection.replace(",", " ").split():
                 try:
@@ -237,6 +230,13 @@ class QwenVLDetection:
                 except Exception:
                     continue
             boxes = [boxes[i] for i in idxs if 0 <= i < len(boxes)]
+
+        if merge_boxes and boxes:
+            x1 = min(b[0] for b in boxes)
+            y1 = min(b[1] for b in boxes)
+            x2 = max(b[2] for b in boxes)
+            y2 = max(b[3] for b in boxes)
+            boxes = [[x1, y1, x2, y2]]
 
         return (output_text, boxes)
 
