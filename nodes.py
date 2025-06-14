@@ -43,7 +43,7 @@ def parse_boxes(
     input_w: int,
     input_h: int,
     score_threshold: float = 0.0,
-) -> List[List[int]]:
+) -> List[Dict[str, Any]]:
     text = parse_json(text)
     try:
         data = ast.literal_eval(text)
@@ -60,10 +60,11 @@ def parse_boxes(
                 data = []
         else:
             data = []
-    items: List[Tuple[float, List[int]]] = []
+    items: List[Dict[str, Any]] = []
     for item in data:
         box = item.get("bbox_2d") or item.get("bbox") or item
-        score = float(item.get("score", 0))
+        label = item.get("label", "")
+        score = float(item.get("score", 1.0))
         y1, x1, y2, x2 = box[1], box[0], box[3], box[2]
         abs_y1 = int(y1 / input_h * img_height)
         abs_x1 = int(x1 / input_w * img_width)
@@ -73,15 +74,10 @@ def parse_boxes(
             abs_x1, abs_x2 = abs_x2, abs_x1
         if abs_y1 > abs_y2:
             abs_y1, abs_y2 = abs_y2, abs_y1
-        items.append((score, [abs_x1, abs_y1, abs_x2, abs_y2]))
-    items.sort(key=lambda x: x[0], reverse=True)
-    filtered = [box for sc, box in items if sc >= score_threshold]
-    if not filtered and items:
-        # SAM2 expects at least one bbox. If all boxes are filtered out,
-        # fall back to the highest‑scoring one so downstream nodes don't
-        # error out.
-        filtered = [items[0][1]]
-    return filtered
+        if score >= score_threshold:
+            items.append({"score": score, "bbox": [abs_x1, abs_y1, abs_x2, abs_y2], "label": label})
+    items.sort(key=lambda x: x["score"], reverse=True)
+    return items
 
 
 @dataclass
@@ -196,8 +192,8 @@ class QwenVLDetection:
                 "image": ("IMAGE",),
                 "target": ("STRING", {"default": "object"}),
                 "bbox_selection": ("STRING", {"default": "all"}),
+                "score_threshold": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "merge_boxes": ("BOOLEAN", {"default": False}),
-                "score_threshold": ("FLOAT", {"default": 0.0}),
             },
         }
 
@@ -212,15 +208,17 @@ class QwenVLDetection:
         image,
         target: str,
         bbox_selection: str = "all",
-        merge_boxes: bool = False,
         score_threshold: float = 0.0,
+        merge_boxes: bool = False,
     ):
         model = qwen_model.model
         processor = qwen_model.processor
-        device = next(model.parameters()).device
-        if qwen_model.device.startswith("cuda") and torch.cuda.is_available():
+        device = qwen_model.device
+        if device == "auto":
+            device = str(next(model.parameters()).device)
+        if device.startswith("cuda") and torch.cuda.is_available():
             try:
-                torch.cuda.set_device(int(qwen_model.device.split(":")[1]))
+                torch.cuda.set_device(int(device.split(":")[1]))
             except Exception:
                 pass
 
@@ -240,10 +238,12 @@ class QwenVLDetection:
         inputs = processor(text=[text], images=[image], return_tensors="pt", padding=True).to(device)
         output_ids = model.generate(**inputs, max_new_tokens=1024)
         gen_ids = [output_ids[len(inp):] for inp, output_ids in zip(inputs.input_ids, output_ids)]
-        output_text = processor.batch_decode(gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)[0]
+        output_text = processor.batch_decode(
+            gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        )[0]
         input_h = inputs['image_grid_thw'][0][1] * 14
         input_w = inputs['image_grid_thw'][0][2] * 14
-        boxes = parse_boxes(
+        items = parse_boxes(
             output_text,
             image.width,
             image.height,
@@ -253,6 +253,7 @@ class QwenVLDetection:
         )
 
         selection = bbox_selection.strip().lower()
+        boxes = items
         if selection != "all" and selection:
             idxs = []
             for part in selection.replace(",", " ").split():
@@ -263,21 +264,53 @@ class QwenVLDetection:
             boxes = [boxes[i] for i in idxs if 0 <= i < len(boxes)]
 
         if merge_boxes and boxes:
-            x1 = min(b[0] for b in boxes)
-            y1 = min(b[1] for b in boxes)
-            x2 = max(b[2] for b in boxes)
-            y2 = max(b[3] for b in boxes)
-            boxes = [[x1, y1, x2, y2]]
+            x1 = min(b["bbox"][0] for b in boxes)
+            y1 = min(b["bbox"][1] for b in boxes)
+            x2 = max(b["bbox"][2] for b in boxes)
+            y2 = max(b["bbox"][3] for b in boxes)
+            score = max(b["score"] for b in boxes)
+            label = boxes[0].get("label", target)
+            boxes = [{"bbox": [x1, y1, x2, y2], "score": score, "label": label}]
 
-        return (output_text, boxes)
+        json_boxes = [
+            {"bbox_2d": b["bbox"], "label": b.get("label", target)} for b in boxes
+        ]
+        json_output = json.dumps(json_boxes, ensure_ascii=False)
+        bboxes_only = [b["bbox"] for b in boxes]
+        return (json_output, bboxes_only)
+
+
+class BBoxesToSAM2:
+    """Convert a list of bounding boxes to the format expected by SAM2 nodes."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"bboxes": ("BBOX",)}}
+
+    RETURN_TYPES = ("BBOXES",)
+    RETURN_NAMES = ("sam2_bboxes",)
+    FUNCTION = "convert"
+    CATEGORY = "Qwen2.5-VL"
+
+    def convert(self, bboxes):
+        if not isinstance(bboxes, list):
+            raise ValueError("bboxes must be a list")
+
+        # If already batched, return as-is
+        if bboxes and isinstance(bboxes[0], (list, tuple)) and bboxes[0] and isinstance(bboxes[0][0], (list, tuple)):
+            return (bboxes,)
+
+        return ([bboxes],)
 
 
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadQwenModel": DownloadAndLoadQwenModel,
     "QwenVLDetection": QwenVLDetection,
+    "BBoxesToSAM2": BBoxesToSAM2,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadQwenModel": "Download and Load Qwen2.5-VL Model",
     "QwenVLDetection": "Qwen2.5-VL Object Detection",
+    "BBoxesToSAM2": "Prepare BBoxes for SAM2",
 }
