@@ -17,16 +17,13 @@ import folder_paths
 
 
 def parse_json(json_output: str) -> str:
-    """Extract the JSON payload from a model response."""
-    lines = json_output.splitlines()
-    for i, line in enumerate(lines):
-        if line.strip() == "```json":
-            json_output = "\n".join(lines[i + 1:])
-            json_output = json_output.split("```", 1)[0]
-            break
+    """Extract the JSON payload from a model response string."""
+    if "```json" in json_output:
+        json_output = json_output.split("```json", 1)[1]
+        json_output = json_output.split("```", 1)[0]
+
     try:
         parsed = json.loads(json_output)
-        # Some responses wrap the JSON in a {"content": "..."} object.
         if isinstance(parsed, dict) and "content" in parsed:
             inner = parsed["content"]
             if isinstance(inner, str):
@@ -44,13 +41,17 @@ def parse_boxes(
     input_h: int,
     score_threshold: float = 0.0,
 ) -> List[Dict[str, Any]]:
+    """Return bounding boxes parsed from the model's raw JSON output."""
     text = parse_json(text)
     try:
-        data = ast.literal_eval(text)
+        data = json.loads(text)
     except Exception:
-        end_idx = text.rfind('"}') + len('"}')
-        truncated = text[:end_idx] + "]"
-        data = ast.literal_eval(truncated)
+        try:
+            data = ast.literal_eval(text)
+        except Exception:
+            end_idx = text.rfind('"}') + len('"}')
+            truncated = text[:end_idx] + "]"
+            data = ast.literal_eval(truncated)
     if isinstance(data, dict):
         inner = data.get("content")
         if isinstance(inner, str):
@@ -60,24 +61,37 @@ def parse_boxes(
                 data = []
         else:
             data = []
-    items: List[Dict[str, Any]] = []
+    items: List[DetectedBox] = []
+    x_scale = img_width / input_w
+    y_scale = img_height / input_h
+
     for item in data:
         box = item.get("bbox_2d") or item.get("bbox") or item
         label = item.get("label", "")
         score = float(item.get("score", 1.0))
         y1, x1, y2, x2 = box[1], box[0], box[3], box[2]
-        abs_y1 = int(y1 / input_h * img_height)
-        abs_x1 = int(x1 / input_w * img_width)
-        abs_y2 = int(y2 / input_h * img_height)
-        abs_x2 = int(x2 / input_w * img_width)
+        abs_y1 = int(y1 * y_scale)
+        abs_x1 = int(x1 * x_scale)
+        abs_y2 = int(y2 * y_scale)
+        abs_x2 = int(x2 * x_scale)
         if abs_x1 > abs_x2:
             abs_x1, abs_x2 = abs_x2, abs_x1
         if abs_y1 > abs_y2:
             abs_y1, abs_y2 = abs_y2, abs_y1
         if score >= score_threshold:
-            items.append({"score": score, "bbox": [abs_x1, abs_y1, abs_x2, abs_y2], "label": label})
-    items.sort(key=lambda x: x["score"], reverse=True)
-    return items
+            items.append(DetectedBox([abs_x1, abs_y1, abs_x2, abs_y2], score, label))
+    items.sort(key=lambda x: x.score, reverse=True)
+    return [
+        {"score": b.score, "bbox": b.bbox, "label": b.label}
+        for b in items
+    ]
+
+
+@dataclass
+class DetectedBox:
+    bbox: List[int]
+    score: float
+    label: str = ""
 
 
 @dataclass
@@ -211,6 +225,7 @@ class QwenVLDetection:
         score_threshold: float = 0.0,
         merge_boxes: bool = False,
     ):
+        """Generate bounding boxes for ``target`` within ``image``."""
         model = qwen_model.model
         processor = qwen_model.processor
         device = qwen_model.device
@@ -236,7 +251,8 @@ class QwenVLDetection:
         ]
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = processor(text=[text], images=[image], return_tensors="pt", padding=True).to(device)
-        output_ids = model.generate(**inputs, max_new_tokens=1024)
+        with torch.no_grad():
+            output_ids = model.generate(**inputs, max_new_tokens=1024)
         gen_ids = [output_ids[len(inp):] for inp, output_ids in zip(inputs.input_ids, output_ids)]
         output_text = processor.batch_decode(
             gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
