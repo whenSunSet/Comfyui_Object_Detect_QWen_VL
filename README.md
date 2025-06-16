@@ -5,7 +5,8 @@ This repository provides a custom [ComfyUI](https://github.com/comfyanonymous/Co
 ## Nodes
 
 ### `DownloadAndLoadQwenModel`
-Downloads a chosen Qwen 2.5-VL model into `models/Qwen` and returns the loaded model and processor. You can choose which device to load the model onto (e.g. `cuda:1` if you have multiple GPUs) and the precision for the checkpoint (INT4, INT8, BF16, FP16 or FP32).  FlashAttention is used for FP16/BF16 but FP32 falls back to PyTorch SDPA since FlashAttention does not support it.
+Downloads a chosen Qwen 2.5-VL model into `models/Qwen` and returns the loaded model and processor. You can choose which device to load the model onto (e.g. `cuda:1` if you have multiple GPUs), the precision for the checkpoint (INT4, INT8, BF16, FP16 or FP32) and whether to use FlashAttention or SDPA. FlashAttention is automatically replaced with SDPA when FP32 precision is selected because FlashAttention does not support it.
+
 
 ### `QwenVLDetection`
 Runs a detection prompt on an input image using the loaded model. The node outputs a JSON list of bounding boxes of the form `{"bbox_2d": [x1, y1, x2, y2], "label": "object"}` and a separate list of coordinates. Boxes are sorted by confidence and you can specify which ones to return using the **bbox_selection** parameter:
@@ -26,6 +27,6 @@ and compatible nodes such as
 
 ## Usage
 1. Place this repository inside your `ComfyUI/custom_nodes` directory.
-2. From the **Download and Load Qwen2.5-VL Model** node, select the model you want to use, choose the desired precision (INT4/INT8/BF16/FP16/FP32) and, if necessary, choose the device (such as `cuda:1`) where it should be loaded. The snapshot download will resume automatically if a previous attempt was interrupted.
+2. From the **Download and Load Qwen2.5-VL Model** node, select the model you want to use, choose the desired precision (INT4/INT8/BF16/FP16/FP32), the attention implementation (FlashAttention or SDPA) and, if necessary, choose the device (such as `cuda:1`) where it should be loaded. The snapshot download will resume automatically if a previous attempt was interrupted. FlashAttention is replaced with SDPA automatically when used with FP32 precision.
 3. Connect the output model to **Qwen2.5-VL Object Detection**, provide an image and the object you want to locate (e.g. `cat`). Optionally set **score_threshold** to filter out low-confidence boxes, use **bbox_selection** to choose specific ones (e.g. `0,2`) and enable **merge_boxes** if you want them merged. The node will automatically build the detection prompt and return the selected boxes in JSON.
 4. Pass the bounding boxes through **Prepare BBoxes for SAM2** before feeding them into the SAM2 workflow.

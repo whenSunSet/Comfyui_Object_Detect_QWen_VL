@@ -125,6 +125,10 @@ class DownloadAndLoadQwenModel:
                     "FP16",
                     "FP32",
                 ], ),
+                "attention": ([
+                    "flash_attention_2",
+                    "sdpa",
+                ], ),
             }
         }
 
@@ -133,7 +137,7 @@ class DownloadAndLoadQwenModel:
     FUNCTION = "load"
     CATEGORY = "Qwen2.5-VL"
 
-    def load(self, model_name: str, device: str, precision: str):
+    def load(self, model_name: str, device: str, precision: str, attention: str):
         model_dir = os.path.join(folder_paths.models_dir, "Qwen", model_name.replace("/", "_"))
         # Always attempt download with resume enabled so an interrupted download
         # can be continued when the node is executed again.
@@ -163,8 +167,8 @@ class DownloadAndLoadQwenModel:
         elif precision == "INT8":
             quant_config = BitsAndBytesConfig(load_in_8bit=True)
 
-        attn_impl = "flash_attention_2"
-        if precision == "FP32":
+        attn_impl = attention
+        if precision == "FP32" and attn_impl == "flash_attention_2":
             # FlashAttention doesn't support fp32. Fall back to SDPA.
             attn_impl = "sdpa"
 
